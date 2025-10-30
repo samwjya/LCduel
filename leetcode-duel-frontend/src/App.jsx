@@ -1,34 +1,30 @@
 import { useState } from "react";
+import Editor from "@monaco-editor/react";
 
 function App() {
   const [username, setUsername] = useState("");
   const [ws, setWs] = useState(null);
   const [status, setStatus] = useState("");
   const [problem, setProblem] = useState(null);
+  const [language, setLanguage] = useState("python");
+  const [code, setCode] = useState(
+    "# Type your solution here\n\nclass Solution:\n    def solve(self):\n        pass"
+  );
 
   const connect = () => {
     if (!username) return alert("Enter a username first!");
     const socket = new WebSocket(`ws://127.0.0.1:8000/ws/${username}`);
 
-    socket.onopen = () => {
-      setStatus("✅ Connected! Click 'Join Duel' to find opponent.");
-    };
-
+    socket.onopen = () => setStatus("✅ Connected! Click 'Join Duel'.");
     socket.onmessage = (event) => {
       const data = JSON.parse(event.data);
-      console.log("📩 Received:", data);
-
       if (data.type === "status") setStatus(data.message);
       if (data.type === "problem") {
-        setStatus("🎯 Match Found!");
         setProblem(data);
+        setStatus("🎯 Match found!");
       }
     };
-
-    socket.onclose = () => {
-      setStatus("❌ Disconnected");
-    };
-
+    socket.onclose = () => setStatus("❌ Disconnected");
     setWs(socket);
   };
 
@@ -37,30 +33,40 @@ function App() {
     ws.send("join");
   };
 
+  const handleRun = () => {
+    console.log("Running code...");
+    console.log("Language:", language);
+    console.log("Code:", code);
+    alert("This will run the code soon (Judge0 integration next)!");
+  };
+
   return (
     <div
       style={{
         fontFamily: "Arial, sans-serif",
         padding: "2rem",
-        maxWidth: "800px",
+        maxWidth: "1000px",
         margin: "auto",
       }}
     >
       <h1>⚔️ LeetCode Duel</h1>
-      <input
-        placeholder="Enter your username"
-        value={username}
-        onChange={(e) => setUsername(e.target.value)}
-        style={{ padding: "0.5rem", marginRight: "0.5rem" }}
-      />
-      <button onClick={connect} style={{ marginRight: "0.5rem" }}>
-        Connect
-      </button>
-      <button onClick={joinQueue} disabled={!ws}>
-        Join Duel
-      </button>
 
-      <p style={{ marginTop: "1rem", fontWeight: "bold" }}>{status}</p>
+      <div style={{ marginBottom: "1rem" }}>
+        <input
+          placeholder="Enter your username"
+          value={username}
+          onChange={(e) => setUsername(e.target.value)}
+          style={{ padding: "0.5rem", marginRight: "0.5rem" }}
+        />
+        <button onClick={connect} style={{ marginRight: "0.5rem" }}>
+          Connect
+        </button>
+        <button onClick={joinQueue} disabled={!ws}>
+          Join Duel
+        </button>
+      </div>
+
+      <p style={{ fontWeight: "bold" }}>{status}</p>
 
       {problem && (
         <div
@@ -84,6 +90,39 @@ function App() {
           <div
             style={{ marginTop: "1rem" }}
             dangerouslySetInnerHTML={{ __html: problem.description }}
+          />
+        </div>
+      )}
+
+      {problem && (
+        <div style={{ marginTop: "2rem" }}>
+          <div style={{ marginBottom: "0.5rem" }}>
+            <label style={{ marginRight: "1rem" }}>Language:</label>
+            <select
+              value={language}
+              onChange={(e) => setLanguage(e.target.value)}
+            >
+              <option value="python">Python</option>
+              <option value="cpp">C++</option>
+              <option value="java">Java</option>
+              <option value="javascript">JavaScript</option>
+            </select>
+            <button onClick={handleRun} style={{ marginLeft: "1rem" }}>
+              ▶ Run
+            </button>
+          </div>
+
+          <Editor
+            height="400px"
+            language={language}
+            value={code}
+            onChange={(value) => setCode(value)}
+            theme="vs-dark"
+            options={{
+              minimap: { enabled: false },
+              fontSize: 14,
+              scrollBeyondLastLine: false,
+            }}
           />
         </div>
       )}
