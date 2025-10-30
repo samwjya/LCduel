@@ -11,6 +11,13 @@ function App() {
     "# Type your solution here\n\nclass Solution:\n    def solve(self):\n        pass"
   );
 
+const languageMap = {
+  python: 71,
+  javascript: 63,
+  java: 62,
+  cpp: 54
+};
+
   const connect = () => {
     if (!username) return alert("Enter a username first!");
     const socket = new WebSocket(`ws://127.0.0.1:8000/ws/${username}`);
@@ -33,12 +40,38 @@ function App() {
     ws.send("join");
   };
 
-  const handleRun = () => {
-    console.log("Running code...");
-    console.log("Language:", language);
-    console.log("Code:", code);
-    alert("This will run the code soon (Judge0 integration next)!");
+  const handleRun = async () => {
+  if (!problem) return alert("No problem loaded yet!");
+
+  const payload = {
+    code,
+    language_id: languageMap[language],
+    stdin: "",
   };
+
+  try {
+    const res = await fetch('http://127.0.0.1:8000/run', {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+
+    const data = await res.json();
+    console.log("Judge0 Result:", data);
+
+    if (data.stdout) {
+      alert(`✅ Output:\n${data.stdout}`);
+    } else if (data.stderr) {
+      alert(`❌ Error:\n${data.stderr}`);
+    } else {
+      alert(`⚠️ ${data.status?.description || "No output"}`);
+    }
+  } catch (error) {
+    console.error(error);
+    alert("Failed to connect to backend.");
+  }
+};
+
 
   return (
     <div

@@ -3,8 +3,20 @@ from app import matchmaker
 from app.models import JoinRequest
 from app import problems
 from app.websocket.endpoint import websocket_endpoints
+import requests
+from fastapi.middleware.cors import CORSMiddleware
 
 app = FastAPI(title="LeetCode Duel")
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:5173"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+
 
 @app.get("/")
 def home():
@@ -25,3 +37,14 @@ def get_problems():
 @app.websocket("/ws/{username}")
 async def websocket_route(websocket: WebSocket, username: str):
     await websocket_endpoints(websocket, username)
+
+@app.post("/run")
+def run_code(req: dict):
+    url = "https://ce.judge0.com/submissions?base64_encoded=false&wait=true"
+    payload = {
+        "source_code": req["code"],
+        "language_id": req["language_id"],
+        "stdin": req.get("stdin", "")
+    }
+    res = requests.post(url, json=payload)
+    return res.json()
