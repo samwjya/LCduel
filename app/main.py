@@ -1,7 +1,8 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, WebSocket
 from app import matchmaker
 from app.models import JoinRequest
 from app import problems
+from app.websocket.endpoint import websocket_endpoints
 
 app = FastAPI(title="LeetCode Duel")
 
@@ -21,3 +22,6 @@ def join_queue(req: JoinRequest):
 def get_problems():
     return problems.get_problem_for_match()
 
+@app.websocket("/ws/{username}")
+async def websocket_route(websocket: WebSocket, username: str):
+    await websocket_endpoints(websocket, username)

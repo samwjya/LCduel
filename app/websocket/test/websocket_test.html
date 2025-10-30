@@ -1,0 +1,21 @@
+<!DOCTYPE html>
+<html>
+  <body>
+    <h3>WebSocket Test</h3>
+    <input id="msg" placeholder="Type 'join' and press Enter" />
+    <script>
+      const ws = new WebSocket("ws://127.0.0.1:8000/ws/samuel");
+
+      ws.onopen = () => console.log("✅ Connected");
+      ws.onmessage = (event) => console.log("📩 Received:", event.data);
+      ws.onclose = () => console.log("❌ Disconnected");
+
+      document.getElementById("msg").addEventListener("keydown", (e) => {
+        if (e.key === "Enter") {
+          ws.send(e.target.value);
+          e.target.value = "";
+        }
+      });
+    </script>
+  </body>
+</html>
