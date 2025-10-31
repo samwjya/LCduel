@@ -11,13 +11,11 @@ def get_problem_for_match():
         db.close()
         return {"error": "No problems found in database"}
 
-    #pick one at random
     chosen = random.choice(problems)
     db.close()
 
-    #fetch full details from API using slug
     url = f"https://alfa-leetcode-api.onrender.com/select?titleSlug={chosen.slug}"
-    print(f"Fetching: {url}")  # Debugging log
+    print(f"Fetching: {url}") 
 
     try:
         res = requests.get(url, timeout=10)

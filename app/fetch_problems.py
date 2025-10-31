@@ -9,14 +9,13 @@ def populate_problems():
     response = requests.get(url)
     
     if response.status_code != 200:
-        print("❌ Failed to fetch problems from API")
+        print("Failed to fetch problems from API")
         return
     
     data = response.json()
-    print(f"✅ Fetched {len(data)} problems")
+    print(f"Fetched {len(data)} problems")
 
     for p in data:
-        # Skip if already in DB
         existing = db.query(Problem).filter(Problem.slug == p["titleSlug"]).first()
         if existing:
             continue
@@ -31,7 +30,7 @@ def populate_problems():
 
     db.commit()
     db.close()
-    print("✅ Problems added to database successfully!")
+    print("Problems added successfully!")
 
 if __name__ == "__main__":
     populate_problems()

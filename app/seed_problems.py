@@ -18,14 +18,13 @@ def seed_problems():
     ]
 
     for p in problems:
-        # avoid duplicates
         existing = db.query(Problem).filter(Problem.slug == p.slug).first()
         if not existing:
             db.add(p)
 
     db.commit()
     db.close()
-    print("✅ samples problems added successfully!")
+    print("samples problems added successfully!")
 
 if __name__ == "__main__":
     seed_problems()

@@ -21,3 +21,4 @@ class Problem(Base):
     difficulty = Column(String, nullable=False)
     slug = Column(String, nullable=False)
     tags = Column(String, nullable=True)
+    testcases = Column(JSON, nullable=True)
