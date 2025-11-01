@@ -10,14 +10,16 @@ function App() {
   const [code, setCode] = useState(
     "# Type your solution here\n\nclass Solution:\n    def solve(self):\n        pass"
   );
+  const [output, setOutput] = useState("");
 
-const languageMap = {
-  python: 71,
-  javascript: 63,
-  java: 62,
-  cpp: 54
-};
+  // const languageMap = {
+  //   python: 71,
+  //   javascript: 63,
+  //   java: 62,
+  //   cpp: 54,
+  // };
 
+  // --- connect to websocket
   const connect = () => {
     if (!username) return alert("Enter a username first!");
     const socket = new WebSocket(`ws://127.0.0.1:8000/ws/${username}`);
@@ -35,43 +37,50 @@ const languageMap = {
     setWs(socket);
   };
 
+  // --- join queue for duel
   const joinQueue = () => {
     if (!ws) return alert("Connect first!");
     ws.send("join");
   };
 
+  // --- run code (connect to FastAPI backend)
   const handleRun = async () => {
-  if (!problem) return alert("No problem loaded yet!");
+    if (!problem) return alert("No problem loaded yet!");
 
-  const payload = {
-    code,
-    language_id: languageMap[language],
-    stdin: "",
-  };
+    const payload = {
+      slug: problem.slug || "two-sum", // fallback for local testing
+      code: code,
+      language: language,
+    };
 
-  try {
-    const res = await fetch('http://127.0.0.1:8000/run', {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
-    });
+    try {
+      const res = await fetch("http://127.0.0.1:8000/run", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
 
-    const data = await res.json();
-    console.log("Judge0 Result:", data);
+      const data = await res.json();
+      console.log("Backend Result:", data);
 
-    if (data.stdout) {
-      alert(`✅ Output:\n${data.stdout}`);
-    } else if (data.stderr) {
-      alert(`❌ Error:\n${data.stderr}`);
-    } else {
-      alert(`⚠️ ${data.status?.description || "No output"}`);
+      if (data.error) {
+        setOutput(`❌ Error: ${data.error}`);
+      } else if (data.all_passed) {
+        setOutput("🎉 All test cases passed!");
+      } else {
+        const resultText = data.results
+          .map(
+            (r, i) =>
+              `#${i + 1}\nInput: ${r.input}\nExpected: ${r.expected}\nOutput: ${r.output}\nPassed: ${r.passed ? "✅" : "❌"}`
+          )
+          .join("\n\n");
+        setOutput(resultText);
+      }
+    } catch (error) {
+      console.error(error);
+      setOutput("⚠️ Failed to connect to backend.");
     }
-  } catch (error) {
-    console.error(error);
-    alert("Failed to connect to backend.");
-  }
-};
-
+  };
 
   return (
     <div
@@ -84,6 +93,7 @@ const languageMap = {
     >
       <h1>⚔️ LeetCode Duel</h1>
 
+      {/* --- connection controls --- */}
       <div style={{ marginBottom: "1rem" }}>
         <input
           placeholder="Enter your username"
@@ -101,6 +111,7 @@ const languageMap = {
 
       <p style={{ fontWeight: "bold" }}>{status}</p>
 
+      {/* --- problem info --- */}
       {problem && (
         <div
           style={{
@@ -115,18 +126,26 @@ const languageMap = {
             <strong>Difficulty:</strong> {problem.difficulty}
           </p>
           <p>
-            <strong>Tags:</strong> {problem.tags.join(", ")}
+            <strong>Tags:</strong>{" "}
+            {Array.isArray(problem.tags)
+              ? problem.tags.join(", ")
+              : problem.tags}
           </p>
-          <a href={problem.link} target="_blank" rel="noreferrer">
-            View on LeetCode
-          </a>
+          {problem.link && (
+            <a href={problem.link} target="_blank" rel="noreferrer">
+              View on LeetCode
+            </a>
+          )}
           <div
             style={{ marginTop: "1rem" }}
-            dangerouslySetInnerHTML={{ __html: problem.description }}
+            dangerouslySetInnerHTML={{
+              __html: problem.description || "",
+            }}
           />
         </div>
       )}
 
+      {/* --- editor + run --- */}
       {problem && (
         <div style={{ marginTop: "2rem" }}>
           <div style={{ marginBottom: "0.5rem" }}>
@@ -157,6 +176,23 @@ const languageMap = {
               scrollBeyondLastLine: false,
             }}
           />
+
+          {/* --- output panel --- */}
+          {output && (
+            <div
+              style={{
+                marginTop: "1rem",
+                padding: "1rem",
+                background: "#1e1e1e",
+                color: "#dcdcdc",
+                borderRadius: "8px",
+                whiteSpace: "pre-wrap",
+              }}
+            >
+              <strong>Output:</strong>
+              <pre>{output}</pre>
+            </div>
+          )}
         </div>
       )}
     </div>
@@ -164,3 +200,4 @@ const languageMap = {
 }
 
 export default App;
+
