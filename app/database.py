@@ -3,6 +3,8 @@ from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
 from dotenv import load_dotenv
 import os
+from sqlalchemy.dialects.postgresql import JSON
+
 
 load_dotenv()
 
@@ -22,3 +24,6 @@ class Problem(Base):
     slug = Column(String, nullable=False)
     tags = Column(String, nullable=True)
     testcases = Column(JSON, nullable=True)
+
+if __name__ == "__main__":
+    Base.metadata.create_all(bind=engine)

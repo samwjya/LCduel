@@ -1,10 +1,16 @@
 from fastapi import FastAPI, WebSocket
+from pydantic import BaseModel
 from app import matchmaker
 from app.models import JoinRequest
 from app import problems
 from app.websocket.endpoint import websocket_endpoints
 import requests
 from fastapi.middleware.cors import CORSMiddleware
+from app.database import SessionLocal, Problem
+import subprocess
+import tempfile
+import os 
+import json
 
 app = FastAPI(title="LeetCode Duel")
 
@@ -38,13 +44,70 @@ def get_problems():
 async def websocket_route(websocket: WebSocket, username: str):
     await websocket_endpoints(websocket, username)
 
+
+class RunRequest(BaseModel):
+    slug: str
+    code: str
+    language: str | None = "python"
+
 @app.post("/run")
-def run_code(req: dict):
-    url = "https://ce.judge0.com/submissions?base64_encoded=false&wait=true"
-    payload = {
-        "source_code": req["code"],
-        "language_id": req["language_id"],
-        "stdin": req.get("stdin", "")
-    }
-    res = requests.post(url, json=payload)
-    return res.json()
+async def run_code(req: RunRequest):
+    problem_slug = req.slug
+    code = req.code
+    language = req.language
+
+    db = SessionLocal()
+    problem = db.query(Problem).filter(Problem.slug == problem_slug).first()
+    db.close()
+
+    if not problem:
+        return {"error": "problem not found"}
+    
+    with tempfile.TemporaryDirectory() as tmpdir:
+        filepath = os.path.join(tmpdir, "solution.py")
+
+        with open(filepath, "w") as f:
+            f.write(code)
+
+            results = []
+        for case in problem.testcases:
+            input_data = case["input"]
+            expected_output = case["expected_output"].strip()
+
+            try:
+                result = subprocess.run(
+                    ["python", filepath],
+                    input=input_data.encode(),
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    timeout=3,
+                )
+                output = result.stdout.decode().strip()
+
+                results.append({
+                    "input": input_data.strip(),
+                    "expected": expected_output,
+                    "output": output,
+                    "passed": output == expected_output,
+                    "error": result.stderr.decode() if result.stderr else None
+                })
+            except subprocess.TimeoutExpired:
+                results.append({
+                    "input": input_data.strip(),
+                    "expected": expected_output,
+                    "output": None,
+                    "passed": False,
+                    "error": "Time limit exceeded"
+                })
+
+    all_passed = all(r["passed"] for r in results)
+    return {"all_passed": all_passed, "results": results}
+    
+
+    
+
+
+
+
+
+
