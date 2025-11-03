@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import Editor from "@monaco-editor/react";
 
 function App() {
@@ -11,13 +11,27 @@ function App() {
     "# Type your solution here\n\nclass Solution:\n    def solve(self):\n        pass"
   );
   const [output, setOutput] = useState("");
+  const [opponent, setOpponent] = useState(""); //ill this after pairing
+  const [timeLeft, setTimeLeft] = useState(600); // 10-minute duel timer
 
-  // const languageMap = {
-  //   python: 71,
-  //   javascript: 63,
-  //   java: 62,
-  //   cpp: 54,
-  // };
+  useEffect(() => {
+    const timer = setInterval(() => {
+      setTimeLeft((prev) => (prev > 0 ? prev - 1 : 0));
+    }, 1000);
+    return () => clearInterval(timer);
+  }, []);
+
+  // auto submit when time hits 0
+  useEffect(() => {
+    if (timeLeft === 0) {
+      fetch("http://127.0.0.1:8000/finish", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ username, opponent }),
+      });
+      alert("⏰ Time’s up! Submitting automatically...");
+    }
+  }, [timeLeft, username, opponent]);
 
   // --- connect to websocket
   const connect = () => {
@@ -27,10 +41,16 @@ function App() {
     socket.onopen = () => setStatus("✅ Connected! Click 'Join Duel'.");
     socket.onmessage = (event) => {
       const data = JSON.parse(event.data);
-      if (data.type === "status") setStatus(data.message);
+      if (data.type === "status") {
+        setStatus(data.message);
+      }
       if (data.type === "problem") {
         setProblem(data);
-        setStatus("🎯 Match found!");
+        setOpponent(data.opponent); 
+        setStatus(`🎯 Match found! Opponent: ${data.opponent}`);
+      }
+      if (data.type === "result") {
+        alert(data.message);
       }
     };
     socket.onclose = () => setStatus("❌ Disconnected");
@@ -110,8 +130,13 @@ function App() {
       </div>
 
       <p style={{ fontWeight: "bold" }}>{status}</p>
-
       {/* --- problem info --- */}
+      {problem && (
+        <p>
+          ⏱ Time left:{" "}
+          {Math.floor(timeLeft / 60)}:{(timeLeft % 60).toString().padStart(2, "0")}
+        </p>
+      )}
       {problem && (
         <div
           style={{
@@ -164,6 +189,25 @@ function App() {
             </button>
           </div>
 
+            <button
+            onClick={() => {
+              if (!ws || !opponent) return alert("You’re not in a duel yet!");
+              ws.send(`finish:${opponent}`);
+              alert("✅ You’ve marked yourself as finished — waiting for opponent...");
+            }}
+            style={{
+              marginLeft: "0.5rem",
+              background: "#28a745",
+              color: "white",
+              padding: "0.5rem 1rem",
+              border: "none",
+              borderRadius: "6px",
+            }}
+          >
+          Finish
+        </button>
+
+
           <Editor
             height="400px"
             language={language}
@@ -200,4 +244,3 @@ function App() {
 }
 
 export default App;
-
