@@ -5,7 +5,7 @@ from app.database import SessionLocal, Problem
 def get_problem_for_match():
     db = SessionLocal()
 
-    #get all problems
+    # get all problems
     problems = db.query(Problem).all()
     if not problems:
         db.close()
@@ -23,6 +23,7 @@ def get_problem_for_match():
 
         if res.status_code == 200:
             return {
+                "slug": chosen.slug, 
                 "title": data.get("questionTitle", chosen.title),
                 "difficulty": data.get("difficulty", chosen.difficulty),
                 "tags": [tag["name"] for tag in data.get("topicTags", [])],
@@ -30,7 +31,14 @@ def get_problem_for_match():
                 "link": data.get("link", f"https://leetcode.com/problems/{chosen.slug}/")
             }
         else:
-            return {"error": f"API error {res.status_code}", "details": data}
+            return {
+                "slug": chosen.slug,  
+                "error": f"API error {res.status_code}", 
+                "details": data
+            }
 
     except Exception as e:
-        return {"error": str(e)}
+        return {
+            "slug": chosen.slug, 
+            "error": str(e)
+        }

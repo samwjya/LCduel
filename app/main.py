@@ -1,4 +1,4 @@
-from fastapi import FastAPI, WebSocket
+from fastapi import FastAPI, WebSocket, Request
 from pydantic import BaseModel
 from app import matchmaker
 from app.models import JoinRequest
@@ -12,8 +12,15 @@ import tempfile
 import os 
 import json
 from datetime import datetime
+import httpx
+from dotenv import load_dotenv
+import base64
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import JSONResponse
 
 app = FastAPI(title="LeetCode Duel")
+load_dotenv()
+
 
 app.add_middleware(
     CORSMiddleware,
@@ -22,6 +29,19 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(request: Request, exc: RequestValidationError):
+    body = await request.body()
+    print("="*50)
+    print("[VALIDATION ERROR]")
+    print(f"Errors: {exc.errors()}")
+    print(f"Request body: {body.decode()}")
+    print("="*50)
+    return JSONResponse(
+        status_code=422,
+        content={"detail": exc.errors()},
+    )
 
 
 
@@ -51,8 +71,23 @@ class RunRequest(BaseModel):
     code: str
     language: str | None = "python"
 
+#---------------------------------------------------------
+# api to handle submission
+RAPIDAPI_HOST = "judge0-ce.p.rapidapi.com"
+RAPIDAPI_URL = f"https://{RAPIDAPI_HOST}/submissions"
+RAPIDAPI_KEY = os.getenv("RAPIDAPI_KEY")
+
+import httpx
+import base64
+import json
+
 @app.post("/run")
 async def run_code(req: RunRequest):
+    print(f"[DEBUG] Received request:")
+    print(f"  slug: {req.slug}")
+    print(f"  code length: {len(req.code)}")
+    print(f"  language: {req.language}")
+    
     problem_slug = req.slug
     code = req.code
     language = req.language
@@ -62,75 +97,139 @@ async def run_code(req: RunRequest):
     db.close()
 
     if not problem:
+        print(f"[ERROR] Problem not found for slug: {problem_slug}")
         return {"error": "problem not found"}
     
-    with tempfile.TemporaryDirectory() as tmpdir:
-        filepath = os.path.join(tmpdir, "solution.py")
+    print(f"[DEBUG] Found problem: {problem.title}")
+    
+    # Language ID mapping for Judge0
+    language_ids = {
+        "python": 71,  # Python 3
+        "javascript": 63,  # Node.js
+        "cpp": 54,  # C++ (GCC 9.2.0)
+        "java": 62,  # Java
+        "c": 50,  # C (GCC 9.2.0)
+    }
+    
+    language_id = language_ids.get(language, 71)  # Default to Python
+    
+    results = []
 
-        with open(filepath, "w") as f:
-            f.write(code)
-
-            results = []
-        for case in problem.testcases:
-            input_data = case["input"]
+    async with httpx.AsyncClient() as client:
+        for idx, case in enumerate(problem.testcases):
+            input_data = case["input"].strip()
             expected_output = case["expected_output"].strip()
 
+            # Don't wrap the code - users handle everything in the template
+            user_code = code
+
+            # Encode source code for Judge0
+            source_encoded = base64.b64encode(user_code.encode()).decode()
+
+            # Submit to Judge0
+            submission_payload = {
+                "language_id": language_id,
+                "source_code": source_encoded,
+                "stdin": input_data,  # Pass raw input via stdin
+                "redirect_stderr_to_stdout": False,
+            }
+
+            headers = {
+                "Content-Type": "application/json",
+                "X-RapidAPI-Key": RAPIDAPI_KEY,
+                "X-RapidAPI-Host": RAPIDAPI_HOST,
+            }
+
+            # Create submission
             try:
-                result = subprocess.run(
-                    ["python", filepath],
-                    input=input_data.encode(),
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.PIPE,
-                    timeout=3,
+                response = await client.post(
+                    f"{RAPIDAPI_URL}?base64_encoded=true&wait=true",
+                    json=submission_payload,
+                    headers=headers,
+                    timeout=30.0
                 )
-                output = result.stdout.decode().strip()
+
+                if response.status_code != 200 and response.status_code != 201:
+                    results.append({
+                        "input": input_data,
+                        "expected": expected_output,
+                        "output": None,
+                        "passed": False,
+                        "error": f"Submission failed with status {response.status_code}",
+                        "status": "Submission Error"
+                    })
+                    continue
+
+                result = response.json()
+                
+                # Decode output (Judge0 returns base64 when base64_encoded=true)
+                stdout = base64.b64decode(result.get("stdout") or "").decode("utf-8", errors="ignore").strip() if result.get("stdout") else ""
+                stderr = base64.b64decode(result.get("stderr") or "").decode("utf-8", errors="ignore").strip() if result.get("stderr") else ""
+                compile_output = base64.b64decode(result.get("compile_output") or "").decode("utf-8", errors="ignore").strip() if result.get("compile_output") else ""
+                
+                # Check status
+                status_id = result.get("status", {}).get("id")
+                status_desc = result.get("status", {}).get("description", "Unknown")
+                
+                # Status IDs: 3 = Accepted
+                execution_success = status_id == 3
+                
+                # Parse output for comparison
+                actual_output = stdout
+                
+                # Try to parse both as JSON for comparison (handles formatting differences)
+                try:
+                    expected_parsed = json.loads(expected_output)
+                    actual_parsed = json.loads(actual_output)
+                    passed = expected_parsed == actual_parsed
+                except (json.JSONDecodeError, ValueError):
+                    # Fall back to string comparison
+                    passed = actual_output == expected_output
+
+                # Only mark as passed if execution succeeded AND output matches
+                passed = execution_success and passed
+
+                error_message = None
+                if not execution_success:
+                    error_message = stderr or compile_output or status_desc
+                elif not passed:
+                    error_message = "Output mismatch"
 
                 results.append({
-                    "input": input_data.strip(),
+                    "input": input_data,
                     "expected": expected_output,
-                    "output": output,
-                    "passed": output == expected_output,
-                    "error": result.stderr.decode() if result.stderr else None
+                    "output": actual_output,
+                    "passed": passed,
+                    "error": error_message,
+                    "status": status_desc,
                 })
-            except subprocess.TimeoutExpired:
+
+            except httpx.TimeoutException:
                 results.append({
-                    "input": input_data.strip(),
+                    "input": input_data,
                     "expected": expected_output,
                     "output": None,
                     "passed": False,
-                    "error": "Time limit exceeded"
+                    "error": "Execution timeout",
+                    "status": "Timeout",
+                })
+            except Exception as e:
+                results.append({
+                    "input": input_data,
+                    "expected": expected_output,
+                    "output": None,
+                    "passed": False,
+                    "error": str(e),
+                    "status": "Error",
                 })
 
     all_passed = all(r["passed"] for r in results)
     return {"all_passed": all_passed, "results": results}
 
-# @app.post("/submit")
-# async def submit_solution(payload: dict):
-#     username = payload.get("username")
-#     problem_slug = payload.get("problem_slug")
-#     passed_all = payload.get("passed_all")  
-#     opponent = payload.get("opponent")
 
-#     if not username or not opponent:
-#         return {"error": "Missing player info"}
 
-#     duel_key = tuple(sorted([username, opponent]))
-#     duel = active_duels.setdefault(duel_key, {"finished": set()})
 
-#     if passed_all:
-#         duel["finished"].add(username)
-
-#         if len(duel["finished"]) == 1:
-#             # first finisher wins
-#             winner = username
-#             await broadcast_winner(winner, opponent)
-#         elif len(duel["finished"]) == 2:
-#             # tie
-#             await broadcast_tie(username, opponent)
-
-#     return {"status": "ok"}
-
-#-----------------------------------------------------------------------------------------\
+#-----------------------------------------------------------------------------------------
 #helper func
 async def finalize_duel(duel_key):
     # This will run automatically after both finish OR timer ends

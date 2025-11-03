@@ -1,74 +1,161 @@
 import { useState, useEffect } from "react";
 import Editor from "@monaco-editor/react";
 
+// Default code templates for each language
+const CODE_TEMPLATES = {
+  python: `class Solution:
+    def solve(self, target, nums):
+        # Your code here
+        pass
+
+if __name__ == "__main__":
+    import sys
+    import json
+    lines = [line.strip() for line in sys.stdin if line.strip()]
+    target = json.loads(lines[1])
+    nums = json.loads(lines[2])
+    
+    s = Solution()
+    result = s.solve(target, nums)
+    print(json.dumps(result))`,
+  
+  javascript: `// Your JavaScript solution here`,
+  cpp: `// Your C++ solution here`,
+  java: `// Your Java solution here`,
+};
+
 function App() {
+  // --- User & Connection State ---
   const [username, setUsername] = useState("");
   const [ws, setWs] = useState(null);
-  const [status, setStatus] = useState("");
+  const [status, setStatus] = useState("Not connected");
+  const [opponent, setOpponent] = useState("");
+
+  // --- Problem State ---
   const [problem, setProblem] = useState(null);
   const [language, setLanguage] = useState("python");
-  const [code, setCode] = useState(
-    "# Type your solution here\n\nclass Solution:\n    def solve(self):\n        pass"
-  );
+  const [code, setCode] = useState(CODE_TEMPLATES.python);
   const [output, setOutput] = useState("");
-  const [opponent, setOpponent] = useState(""); //ill this after pairing
-  const [timeLeft, setTimeLeft] = useState(600); // 10-minute duel timer
+  const [isRunning, setIsRunning] = useState(false);
 
+  // --- Timer State ---
+  const [timeLeft, setTimeLeft] = useState(600); // 10 minutes
+
+  // Timer countdown
   useEffect(() => {
+    if (!problem) return; // Only run timer when problem is loaded
+
     const timer = setInterval(() => {
-      setTimeLeft((prev) => (prev > 0 ? prev - 1 : 0));
+      setTimeLeft((prev) => {
+        if (prev <= 1) {
+          handleTimeUp();
+          return 0;
+        }
+        return prev - 1;
+      });
     }, 1000);
-    return () => clearInterval(timer);
-  }, []);
 
-  // auto submit when time hits 0
-  useEffect(() => {
-    if (timeLeft === 0) {
-      fetch("http://127.0.0.1:8000/finish", {
+    return () => clearInterval(timer);
+  }, [problem]);
+
+  // Auto-submit when time runs out
+  const handleTimeUp = async () => {
+    if (!opponent) return;
+    
+    try {
+      await fetch("http://127.0.0.1:8000/finish", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ username, opponent }),
       });
-      alert("⏰ Time’s up! Submitting automatically...");
+      alert("⏰ Time's up! Submitting automatically...");
+    } catch (error) {
+      console.error("Failed to auto-submit:", error);
     }
-  }, [timeLeft, username, opponent]);
+  };
 
-  // --- connect to websocket
+  // --- WebSocket Connection ---
   const connect = () => {
-    if (!username) return alert("Enter a username first!");
+    if (!username.trim()) {
+      return alert("Please enter a username first!");
+    }
+
     const socket = new WebSocket(`ws://127.0.0.1:8000/ws/${username}`);
 
-    socket.onopen = () => setStatus("✅ Connected! Click 'Join Duel'.");
+    socket.onopen = () => {
+      setStatus("✅ Connected! Click 'Join Duel' to find an opponent.");
+    };
+
     socket.onmessage = (event) => {
       const data = JSON.parse(event.data);
-      if (data.type === "status") {
-        setStatus(data.message);
-      }
-      if (data.type === "problem") {
-        setProblem(data);
-        setOpponent(data.opponent); 
-        setStatus(`🎯 Match found! Opponent: ${data.opponent}`);
-      }
-      if (data.type === "result") {
-        alert(data.message);
+
+      switch (data.type) {
+        case "status":
+          setStatus(data.message);
+          break;
+
+        case "problem":
+          setProblem(data);
+          setOpponent(data.opponent);
+          setStatus(`🎯 Match found! Opponent: ${data.opponent}`);
+          setTimeLeft(600); // Reset timer
+          break;
+
+        case "result":
+          alert(data.message);
+          // Reset state after duel ends
+          setProblem(null);
+          setOpponent("");
+          setOutput("");
+          setCode(CODE_TEMPLATES[language]);
+          break;
+
+        default:
+          console.log("Unknown message type:", data);
       }
     };
-    socket.onclose = () => setStatus("❌ Disconnected");
+
+    socket.onerror = (error) => {
+      console.error("WebSocket error:", error);
+      setStatus("❌ Connection error");
+    };
+
+    socket.onclose = () => {
+      setStatus("❌ Disconnected");
+      setWs(null);
+    };
+
     setWs(socket);
   };
 
-  // --- join queue for duel
-  const joinQueue = () => {
-    if (!ws) return alert("Connect first!");
-    ws.send("join");
+  const disconnect = () => {
+    if (ws) {
+      ws.close();
+      setWs(null);
+      setStatus("Disconnected");
+    }
   };
 
-  // --- run code (connect to FastAPI backend)
+  // --- Join Queue ---
+  const joinQueue = () => {
+    if (!ws) {
+      return alert("Please connect first!");
+    }
+    ws.send("join");
+    setStatus("⏳ Searching for opponent...");
+  };
+
+  // --- Run Code ---
   const handleRun = async () => {
-    if (!problem) return alert("No problem loaded yet!");
+    if (!problem) {
+      return alert("No problem loaded yet!");
+    }
+
+    setIsRunning(true);
+    setOutput("Running...");
 
     const payload = {
-      slug: problem.slug || "two-sum", // fallback for local testing
+      slug: problem.slug,
       code: code,
       language: language,
     };
@@ -81,135 +168,163 @@ function App() {
       });
 
       const data = await res.json();
-      console.log("Backend Result:", data);
 
       if (data.error) {
         setOutput(`❌ Error: ${data.error}`);
       } else if (data.all_passed) {
-        setOutput("🎉 All test cases passed!");
+        setOutput("✅ All test cases passed! You can click 'Finish' when ready.");
       } else {
         const resultText = data.results
-          .map(
-            (r, i) =>
-              `#${i + 1}\nInput: ${r.input}\nExpected: ${r.expected}\nOutput: ${r.output}\nPassed: ${r.passed ? "✅" : "❌"}`
-          )
-          .join("\n\n");
+          .map((r, i) => {
+            const lines = [
+              `Test Case #${i + 1}`,
+              `Input: ${r.input}`,
+              `Expected: ${r.expected}`,
+              `Output: ${r.output || "null"}`,
+              `Status: ${r.status}`,
+              `Passed: ${r.passed ? "✅" : "❌"}`,
+            ];
+            
+            if (r.error) {
+              lines.push(`Error: ${r.error}`);
+            }
+            
+            return lines.join("\n");
+          })
+          .join("\n\n" + "=".repeat(50) + "\n\n");
+        
         setOutput(resultText);
       }
     } catch (error) {
-      console.error(error);
-      setOutput("⚠️ Failed to connect to backend.");
+      console.error("Run error:", error);
+      setOutput("⚠️ Failed to connect to backend. Is the server running?");
+    } finally {
+      setIsRunning(false);
     }
   };
 
-  return (
-    <div
-      style={{
-        fontFamily: "Arial, sans-serif",
-        padding: "2rem",
-        maxWidth: "1000px",
-        margin: "auto",
-      }}
-    >
-      <h1>⚔️ LeetCode Duel</h1>
+  // --- Finish Duel ---
+  const handleFinish = () => {
+    if (!ws || !opponent) {
+      return alert("You're not in a duel yet!");
+    }
 
-      {/* --- connection controls --- */}
-      <div style={{ marginBottom: "1rem" }}>
+    ws.send(`finish:${opponent}`);
+    alert("✅ Marked as finished! Waiting for opponent...");
+  };
+
+  // --- Language Change ---
+  const handleLanguageChange = (newLang) => {
+    setLanguage(newLang);
+    setCode(CODE_TEMPLATES[newLang]);
+  };
+
+  // --- Format Time ---
+  const formatTime = (seconds) => {
+    const mins = Math.floor(seconds / 60);
+    const secs = seconds % 60;
+    return `${mins}:${secs.toString().padStart(2, "0")}`;
+  };
+
+  return (
+    <div style={styles.container}>
+      <header style={styles.header}>
+        <h1>⚔️ LeetCode Duel</h1>
+      </header>
+
+      {/* Connection Panel */}
+      <div style={styles.connectionPanel}>
         <input
           placeholder="Enter your username"
           value={username}
           onChange={(e) => setUsername(e.target.value)}
-          style={{ padding: "0.5rem", marginRight: "0.5rem" }}
+          disabled={ws !== null}
+          style={styles.input}
         />
-        <button onClick={connect} style={{ marginRight: "0.5rem" }}>
-          Connect
-        </button>
-        <button onClick={joinQueue} disabled={!ws}>
+        {!ws ? (
+          <button onClick={connect} style={styles.button}>
+            Connect
+          </button>
+        ) : (
+          <button onClick={disconnect} style={styles.buttonDanger}>
+            Disconnect
+          </button>
+        )}
+        <button onClick={joinQueue} disabled={!ws || problem !== null} style={styles.button}>
           Join Duel
         </button>
       </div>
 
-      <p style={{ fontWeight: "bold" }}>{status}</p>
-      {/* --- problem info --- */}
+      <p style={styles.status}>{status}</p>
+
+      {/* Timer */}
       {problem && (
-        <p>
-          ⏱ Time left:{" "}
-          {Math.floor(timeLeft / 60)}:{(timeLeft % 60).toString().padStart(2, "0")}
-        </p>
+        <div style={styles.timer}>
+          <span>⏱️ Time Left: </span>
+          <strong style={{ color: timeLeft < 60 ? "#ff4444" : "#4CAF50" }}>
+            {formatTime(timeLeft)}
+          </strong>
+        </div>
       )}
+
+      {/* Problem Display */}
       {problem && (
-        <div
-          style={{
-            marginTop: "1.5rem",
-            padding: "1rem",
-            border: "1px solid #ccc",
-            borderRadius: "10px",
-          }}
-        >
+        <div style={styles.problemCard}>
           <h2>{problem.title}</h2>
-          <p>
-            <strong>Difficulty:</strong> {problem.difficulty}
-          </p>
-          <p>
-            <strong>Tags:</strong>{" "}
-            {Array.isArray(problem.tags)
-              ? problem.tags.join(", ")
-              : problem.tags}
-          </p>
+          <div style={styles.problemMeta}>
+            <span style={styles.badge}>
+              {problem.difficulty}
+            </span>
+            <span style={styles.tags}>
+              {Array.isArray(problem.tags) ? problem.tags.join(", ") : problem.tags}
+            </span>
+          </div>
           {problem.link && (
-            <a href={problem.link} target="_blank" rel="noreferrer">
-              View on LeetCode
+            <a href={problem.link} target="_blank" rel="noreferrer" style={styles.link}>
+              📄 View on LeetCode
             </a>
           )}
           <div
-            style={{ marginTop: "1rem" }}
-            dangerouslySetInnerHTML={{
-              __html: problem.description || "",
-            }}
+            style={styles.description}
+            dangerouslySetInnerHTML={{ __html: problem.description || "" }}
           />
         </div>
       )}
 
-      {/* --- editor + run --- */}
+      {/* Code Editor */}
       {problem && (
-        <div style={{ marginTop: "2rem" }}>
-          <div style={{ marginBottom: "0.5rem" }}>
-            <label style={{ marginRight: "1rem" }}>Language:</label>
-            <select
-              value={language}
-              onChange={(e) => setLanguage(e.target.value)}
-            >
-              <option value="python">Python</option>
-              <option value="cpp">C++</option>
-              <option value="java">Java</option>
-              <option value="javascript">JavaScript</option>
-            </select>
-            <button onClick={handleRun} style={{ marginLeft: "1rem" }}>
-              ▶ Run
-            </button>
+        <div style={styles.editorSection}>
+          <div style={styles.editorControls}>
+            <div>
+              <label style={styles.label}>Language: </label>
+              <select
+                value={language}
+                onChange={(e) => handleLanguageChange(e.target.value)}
+                style={styles.select}
+              >
+                <option value="python">Python</option>
+                <option value="javascript">JavaScript</option>
+                <option value="cpp">C++</option>
+                <option value="java">Java</option>
+              </select>
+            </div>
+
+            <div>
+              <button
+                onClick={handleRun}
+                disabled={isRunning}
+                style={styles.buttonPrimary}
+              >
+                {isRunning ? "⏳ Running..." : "▶️ Run"}
+              </button>
+              <button onClick={handleFinish} style={styles.buttonSuccess}>
+                ✓ Finish
+              </button>
+            </div>
           </div>
 
-            <button
-            onClick={() => {
-              if (!ws || !opponent) return alert("You’re not in a duel yet!");
-              ws.send(`finish:${opponent}`);
-              alert("✅ You’ve marked yourself as finished — waiting for opponent...");
-            }}
-            style={{
-              marginLeft: "0.5rem",
-              background: "#28a745",
-              color: "white",
-              padding: "0.5rem 1rem",
-              border: "none",
-              borderRadius: "6px",
-            }}
-          >
-          Finish
-        </button>
-
-
           <Editor
-            height="400px"
+            height="450px"
             language={language}
             value={code}
             onChange={(value) => setCode(value)}
@@ -218,29 +333,205 @@ function App() {
               minimap: { enabled: false },
               fontSize: 14,
               scrollBeyondLastLine: false,
+              lineNumbers: "on",
+              automaticLayout: true,
             }}
           />
 
-          {/* --- output panel --- */}
+          {/* Output Panel */}
           {output && (
-            <div
-              style={{
-                marginTop: "1rem",
-                padding: "1rem",
-                background: "#1e1e1e",
-                color: "#dcdcdc",
-                borderRadius: "8px",
-                whiteSpace: "pre-wrap",
-              }}
-            >
-              <strong>Output:</strong>
-              <pre>{output}</pre>
+            <div style={styles.outputPanel}>
+              <strong>📋 Output:</strong>
+              <pre style={styles.outputText}>{output}</pre>
             </div>
           )}
+        </div>
+      )}
+
+      {/* Instructions (when no problem loaded) */}
+      {!problem && ws && (
+        <div style={styles.instructions}>
+          <h3>🎮 How to Play</h3>
+          <ol>
+            <li>Click "Join Duel" to find an opponent</li>
+            <li>Solve the problem faster than your opponent</li>
+            <li>Click "Run" to test your code</li>
+            <li>Click "Finish" when you're done</li>
+            <li>First to finish with all tests passing wins!</li>
+          </ol>
         </div>
       )}
     </div>
   );
 }
+
+// Styles
+const styles = {
+  container: {
+    fontFamily: "'Segoe UI', Tahoma, Geneva, Verdana, sans-serif",
+    padding: "2rem",
+    maxWidth: "1200px",
+    margin: "0 auto",
+    backgroundColor: "#f5f5f5",
+    minHeight: "100vh",
+  },
+  header: {
+    textAlign: "center",
+    marginBottom: "2rem",
+    color: "#333",
+  },
+  connectionPanel: {
+    display: "flex",
+    gap: "0.5rem",
+    marginBottom: "1rem",
+    flexWrap: "wrap",
+  },
+  input: {
+    padding: "0.6rem",
+    borderRadius: "6px",
+    border: "1px solid #ddd",
+    fontSize: "14px",
+    flex: "1",
+    minWidth: "200px",
+  },
+  button: {
+    padding: "0.6rem 1.2rem",
+    borderRadius: "6px",
+    border: "none",
+    backgroundColor: "#2196F3",
+    color: "white",
+    cursor: "pointer",
+    fontSize: "14px",
+    fontWeight: "500",
+  },
+  buttonPrimary: {
+    padding: "0.6rem 1.2rem",
+    borderRadius: "6px",
+    border: "none",
+    backgroundColor: "#2196F3",
+    color: "white",
+    cursor: "pointer",
+    fontSize: "14px",
+    fontWeight: "500",
+    marginRight: "0.5rem",
+  },
+  buttonSuccess: {
+    padding: "0.6rem 1.2rem",
+    borderRadius: "6px",
+    border: "none",
+    backgroundColor: "#28a745",
+    color: "white",
+    cursor: "pointer",
+    fontSize: "14px",
+    fontWeight: "500",
+  },
+  buttonDanger: {
+    padding: "0.6rem 1.2rem",
+    borderRadius: "6px",
+    border: "none",
+    backgroundColor: "#dc3545",
+    color: "white",
+    cursor: "pointer",
+    fontSize: "14px",
+    fontWeight: "500",
+  },
+  status: {
+    fontWeight: "600",
+    padding: "0.8rem",
+    backgroundColor: "white",
+    borderRadius: "6px",
+    border: "1px solid #ddd",
+    marginBottom: "1rem",
+  },
+  timer: {
+    fontSize: "1.2rem",
+    padding: "0.8rem",
+    backgroundColor: "white",
+    borderRadius: "6px",
+    border: "2px solid #4CAF50",
+    marginBottom: "1rem",
+    textAlign: "center",
+  },
+  problemCard: {
+    marginTop: "1.5rem",
+    padding: "1.5rem",
+    backgroundColor: "white",
+    border: "1px solid #ddd",
+    borderRadius: "10px",
+    boxShadow: "0 2px 4px rgba(0,0,0,0.1)",
+  },
+  problemMeta: {
+    display: "flex",
+    gap: "1rem",
+    alignItems: "center",
+    marginTop: "0.5rem",
+    marginBottom: "1rem",
+  },
+  badge: {
+    padding: "0.3rem 0.8rem",
+    backgroundColor: "#ff9800",
+    color: "white",
+    borderRadius: "12px",
+    fontSize: "12px",
+    fontWeight: "600",
+  },
+  tags: {
+    color: "#666",
+    fontSize: "14px",
+  },
+  link: {
+    color: "#2196F3",
+    textDecoration: "none",
+    fontSize: "14px",
+  },
+  description: {
+    marginTop: "1rem",
+    lineHeight: "1.6",
+  },
+  editorSection: {
+    marginTop: "2rem",
+  },
+  editorControls: {
+    display: "flex",
+    justifyContent: "space-between",
+    alignItems: "center",
+    marginBottom: "0.8rem",
+    padding: "0.8rem",
+    backgroundColor: "white",
+    borderRadius: "6px",
+    border: "1px solid #ddd",
+  },
+  label: {
+    marginRight: "0.5rem",
+    fontWeight: "500",
+  },
+  select: {
+    padding: "0.5rem",
+    borderRadius: "4px",
+    border: "1px solid #ddd",
+  },
+  outputPanel: {
+    marginTop: "1rem",
+    padding: "1rem",
+    backgroundColor: "#1e1e1e",
+    color: "#dcdcdc",
+    borderRadius: "8px",
+    maxHeight: "300px",
+    overflow: "auto",
+  },
+  outputText: {
+    marginTop: "0.5rem",
+    whiteSpace: "pre-wrap",
+    fontSize: "13px",
+    lineHeight: "1.5",
+  },
+  instructions: {
+    marginTop: "2rem",
+    padding: "1.5rem",
+    backgroundColor: "white",
+    borderRadius: "10px",
+    border: "1px solid #ddd",
+  },
+};
 
 export default App;
