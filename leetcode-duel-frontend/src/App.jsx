@@ -4,19 +4,29 @@ import Editor from "@monaco-editor/react";
 // Default code templates for each language
 const CODE_TEMPLATES = {
   python: `class Solution:
-    def solve(self, target, nums):
+    def solve(self, *args):
         # Your code here
+        # args will contain all the inputs
+        # For two-sum: args = (target, nums)
+        # For substring: args = (s,)
         pass
 
 if __name__ == "__main__":
     import sys
     import json
+    
     lines = [line.strip() for line in sys.stdin if line.strip()]
-    target = json.loads(lines[1])
-    nums = json.loads(lines[2])
+    
+    # Parse all inputs (skip first line if it's metadata)
+    inputs = []
+    for line in lines:
+        try:
+            inputs.append(json.loads(line))
+        except json.JSONDecodeError:
+            inputs.append(line)
     
     s = Solution()
-    result = s.solve(target, nums)
+    result = s.solve(*inputs)
     print(json.dumps(result))`,
   
   javascript: `// Your JavaScript solution here`,

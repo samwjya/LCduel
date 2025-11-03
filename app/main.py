@@ -83,11 +83,6 @@ import json
 
 @app.post("/run")
 async def run_code(req: RunRequest):
-    print(f"[DEBUG] Received request:")
-    print(f"  slug: {req.slug}")
-    print(f"  code length: {len(req.code)}")
-    print(f"  language: {req.language}")
-    
     problem_slug = req.slug
     code = req.code
     language = req.language
@@ -97,10 +92,7 @@ async def run_code(req: RunRequest):
     db.close()
 
     if not problem:
-        print(f"[ERROR] Problem not found for slug: {problem_slug}")
         return {"error": "problem not found"}
-    
-    print(f"[DEBUG] Found problem: {problem.title}")
     
     # Language ID mapping for Judge0
     language_ids = {
@@ -120,17 +112,14 @@ async def run_code(req: RunRequest):
             input_data = case["input"].strip()
             expected_output = case["expected_output"].strip()
 
-            # Don't wrap the code - users handle everything in the template
+            # Don't modify user code - they handle everything
             user_code = code
 
-            # Encode source code for Judge0
-            source_encoded = base64.b64encode(user_code.encode()).decode()
-
-            # Submit to Judge0
+            # DON'T use base64 encoding - use plain text
             submission_payload = {
                 "language_id": language_id,
-                "source_code": source_encoded,
-                "stdin": input_data,  # Pass raw input via stdin
+                "source_code": user_code,  # Plain text
+                "stdin": input_data,  # Plain text
                 "redirect_stderr_to_stdout": False,
             }
 
@@ -140,10 +129,10 @@ async def run_code(req: RunRequest):
                 "X-RapidAPI-Host": RAPIDAPI_HOST,
             }
 
-            # Create submission
+            # Create submission WITHOUT base64_encoded parameter
             try:
                 response = await client.post(
-                    f"{RAPIDAPI_URL}?base64_encoded=true&wait=true",
+                    f"{RAPIDAPI_URL}?base64_encoded=false&wait=true",  # ← Changed to false
                     json=submission_payload,
                     headers=headers,
                     timeout=30.0
@@ -162,10 +151,10 @@ async def run_code(req: RunRequest):
 
                 result = response.json()
                 
-                # Decode output (Judge0 returns base64 when base64_encoded=true)
-                stdout = base64.b64decode(result.get("stdout") or "").decode("utf-8", errors="ignore").strip() if result.get("stdout") else ""
-                stderr = base64.b64decode(result.get("stderr") or "").decode("utf-8", errors="ignore").strip() if result.get("stderr") else ""
-                compile_output = base64.b64decode(result.get("compile_output") or "").decode("utf-8", errors="ignore").strip() if result.get("compile_output") else ""
+                # NO base64 decoding needed - Judge0 returns plain text
+                stdout = (result.get("stdout") or "").strip()
+                stderr = (result.get("stderr") or "").strip()
+                compile_output = (result.get("compile_output") or "").strip()
                 
                 # Check status
                 status_id = result.get("status", {}).get("id")
@@ -177,7 +166,7 @@ async def run_code(req: RunRequest):
                 # Parse output for comparison
                 actual_output = stdout
                 
-                # Try to parse both as JSON for comparison (handles formatting differences)
+                # Try to parse both as JSON for comparison
                 try:
                     expected_parsed = json.loads(expected_output)
                     actual_parsed = json.loads(actual_output)
