@@ -11,6 +11,7 @@ import subprocess
 import tempfile
 import os 
 import json
+from datetime import datetime
 
 app = FastAPI(title="LeetCode Duel")
 
@@ -102,6 +103,64 @@ async def run_code(req: RunRequest):
 
     all_passed = all(r["passed"] for r in results)
     return {"all_passed": all_passed, "results": results}
+
+# @app.post("/submit")
+# async def submit_solution(payload: dict):
+#     username = payload.get("username")
+#     problem_slug = payload.get("problem_slug")
+#     passed_all = payload.get("passed_all")  
+#     opponent = payload.get("opponent")
+
+#     if not username or not opponent:
+#         return {"error": "Missing player info"}
+
+#     duel_key = tuple(sorted([username, opponent]))
+#     duel = active_duels.setdefault(duel_key, {"finished": set()})
+
+#     if passed_all:
+#         duel["finished"].add(username)
+
+#         if len(duel["finished"]) == 1:
+#             # first finisher wins
+#             winner = username
+#             await broadcast_winner(winner, opponent)
+#         elif len(duel["finished"]) == 2:
+#             # tie
+#             await broadcast_tie(username, opponent)
+
+#     return {"status": "ok"}
+
+#-----------------------------------------------------------------------------------------\
+#helper func
+async def finalize_duel(duel_key):
+    # This will run automatically after both finish OR timer ends
+    p1, p2 = duel_key
+    print(f"Finalizing duel between {p1} and {p2}")
+
+    # TODO: Check their test results
+    # TODO: Call AI judge if both passed
+    # TODO: Broadcast result via WebSocket
+
+    print("Duel finished!")
+
+@app.post("/finish")
+async def finish_duel(payload: dict):
+    username = payload.get("username")
+    opponent = payload.get("opponent")
+
+    if not username or not opponent:
+        return {"error": "Missing username or opponent"}
+
+    duel_key = tuple(sorted([username, opponent]))
+    duel = duel_states.setdefault(duel_key, {"finished": set(), "start": datetime.utcnow(), "duration": 600})
+
+    duel["finished"].add(username)
+
+    # If both finished, trigger evaluation
+    if len(duel["finished"]) == 2:
+        await finalize_duel(duel_key)
+
+    return {"message": f"{username} marked as finished"}
     
 
     

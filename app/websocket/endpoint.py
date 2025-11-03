@@ -2,8 +2,14 @@ from fastapi import WebSocket, WebSocketDisconnect
 from app.websocket.manager import ConnectionManager
 from app import matchmaker, problems
 import json
+import asyncio
+from datetime import datetime, timedelta
 
 manager = ConnectionManager()
+active_duels = {}
+async def end_duel(duel_key):
+    await asyncio.sleep(active_duels[duel_key]["duration"])
+    await finalize_duel(duel_key)
 
 async def websocket_endpoints(websocket: WebSocket, username: str):
     await manager.connect(username, websocket)
@@ -42,3 +48,8 @@ async def websocket_endpoints(websocket: WebSocket, username: str):
 
     except WebSocketDisconnect:
         manager.disconnect(username)
+
+duel_key = tuple(sorted([player1, player2]))
+active_duels[duel_key] = {"start": datetime.utcnow(), "duration": 600, "finished": set()}
+
+asyncio.create_task(end_duel_after_time(duel_key))
