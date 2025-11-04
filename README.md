@@ -2,7 +2,7 @@
 
 LC Duel is a real-time coding duel platform inspired by LeetCode.  
 It allows users to compete against each other by solving programming problems in real time.  
-The app uses **FastAPI** for the backend, **React** for the frontend, **PostgreSQL** for data storage, and the **Judge0 API** to run code in a sandboxed environment.
+The app uses **FastAPI** for the backend, **React** for the frontend, **PostgreSQL** for data storage,  **Judge0 API**,**alfa-leetcode-api**, and **Monaco Editor** to run code in a sandboxed environment.
 
 ---
 
