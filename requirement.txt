@@ -1,4 +1,0 @@
-.venv\Scripts\activate
-
-frontend: npm run dev
-backend: 
